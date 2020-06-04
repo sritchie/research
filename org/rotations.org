@@ -1,0 +1,198 @@
+# -*- eval: (org-num-mode 1); org-download-image-dir: "images"; -*-
+#+title: Spin and Rotations
+#+subtitle: Computational Physics!
+#+startup: indent num
+#+date: 2020-05-26
+
+* Intro
+
+I went a little bonkers yesterday, thinking about how rotations work and
+compose. Here's the template:
+
+I needed to write a function that would take me from spherical coordinates over
+to a "hermitian operator" that could measure the spin state in that direction.
+That is a fairly straightforward exercise, so no problem.
+
+One way to do it is by just trusting that the Pauli matrices form a basis, and
+going through the exercise.
+
+** The Point
+
+The goal of this essay is to show
+
+- what I was trying to do
+- how I started to figure it out
+- how it took me a LOT deeper, with references.
+
+I'd say you're not supposed to understand everything, though I'll try to teach
+what I can. Let's see how far we can get.
+
+** Rotations
+
+But there's another method inspired by something I found online. If you take
+$e^{{i \theta \over 2} \sigma_i}$, you'll apparently got a new operator that
+will rotate you around the $i$th axis.
+
+How does that work? What is going on?
+
+First, I got it working. I made a Mathematica notebook that would let me explore
+this method.
+
+*** Matrix Exponentials
+
+I can show very mechanically what is going on, with a derivation here about
+matrix exponentials. If you can show that $A^2$ cycles you back to identity, you
+can do this great derivation.
+
+Then you can define the rotation matrices. And they totally work, and compose
+nicely.
+
+Show the rotations on the Bloch sphere.
+
+*** Rotations in 3D Space
+
+There is something strange going on here. WHAT rotation does the matrix mean?
+How would you come up with something like this? You're taking the exponential,
+and somehow getting a rotation around an axis.
+
+How do we know what the "axis" is?
+
+Now we can go through the whole nice derivation that made this work in 3D space.
+
+And I can probably do some Mathematica and show that this works.
+
+*** Lie Groups
+
+There are a few missing pieces:
+
+- the jump to complex numbers. Does anything break? What is the "meaning" of the
+  exponential?
+
+*** Hermitian Matrix derivation
+
+Show the derivation where we break apart into the basis and the internal
+diagonal element. THEN, we're basically inducing a rotation around $\phi$ in
+that basis, which introduces a /relative/ phase shift that only shows up when
+you rotate back out of the basis.
+
+And that totally makes sense when you look at the sphere! You are NEVER going to
+affect a measurement when you rotate around the axis where you're trying to
+measure. It's only when you rotate back out that the relative phase shift
+appears.
+
+* Quaternions
+
+I know that this is where the secret lives. The secret is that you seem to have
+to multiply by $i$ again to get the unit quaternions. And each one describes
+some rotation about an axis. When you stick /that/ one in the exponent, you get
+a matrix that rotates you around that axis.
+
+It's a little accident that the Paul matrices look the way they do, I guess.
+
+* Conclusion
+
+So where am I?
+
+- I've got the thing working.
+- I can recover the shape of the general rotation Hermitian operator; but more
+  importantly, I can do these nice rotations without having to diagonalize
+  anything.
+- I have a MUCH better understanding of some ways of doing rotations in 3d
+  space.
+
+* References
+
+Logging these here for later
+
+- The [[Book: Physics from Symmetry]] page 35 has a great derivation, but the key
+  here, I THINK, is that I needed to multiply the matrices by $i$ to make them
+  skew-symmetric. And that is important handle on SO(3) now, and how you can use
+  an exponential to go from a rotation axis and an angle to a rotation matrix
+
+- It's interesting that when you do the [[Euler's Formula]] derivation, the fact
+  that $i$ cycles around lets you split the sum apart into cos and sin terms.
+  Here, for the rotations case, you have to rely on the fact that the.
+
+
+- #[[Pauli Matrices]] and #[[Quaternions]]
+
+    - The [[Book: Physics from Symmetry]] page 35 has a great derivation, but the
+      key here, I THINK, is that I needed to multiply the matrices by `i` to
+      make them skew-symmetric. And that is important  handle on SO(3) now, and
+      how you can use an exponential to go from a rotation axis and an angle to
+      a rotation matrix
+
+    - It's interesting that when you do the [[Euler's Formula]] derivation, the fact
+      that $$i$$ cycles around lets you split the sum apart into cos and sin
+      terms. Here, for the rotations case, you have to rely on the fact that the
+
+- #[[Spin Operators]]
+
+    - I spent a LOT of time this AM trying to understand, intuitively, why you
+      can take a matrix exponential of a rotation matrix, something like $$e^{i
+      \theta A}$$, and treat that as rotation by $$\theta$$ around the axis that
+      the rotation matrix is measuring along. The secret is something to do with
+      the axis-angle formulation of rotations, quaternions... and I know that
+      this is going to be important, eventually. I couldn't figure it out, but I
+      built a nice Mathematica notebook showing what is going on, and how it
+      works at all.
+
+        - Well... we have to have complex eigenvectors, other than a SINGLE one,
+          I think, for a rotation matrix. This question discusses the intuitive
+          interpretation:
+          https://math.stackexchange.com/questions/241097/geometric-interpretation-for-complex-eigenvectors-of-a-2%C3%972-rotation-matrix.
+
+        - {{[[TODO]]}} Quantum mechanics rotation chapter:
+          https://www2.ph.ed.ac.uk/~ldeldebb/docs/QM2/chap4.pdf
+
+        - {{[[TODO]]}} Rotations, notes from Wheeler
+          http://www.physics.usu.edu/Wheeler/QuantumMechanics/QM17AngularMomentum.pdf
+
+        - **Skew Symmetry is Important**
+
+            - The critical piece is that you multiply the pauli matrices by
+              $$i$$; that makes them skew-symmetric, or anti-symmetric, which
+              allows them to work like rotation matrices when you take the
+              matrix exponential of them.
+
+            - You could look at this a different way. If you came at it a
+              different way and found the generators of rotations in complex
+              space, you'd find that you ALREADY had the pauli matrices times
+              $$i$$. Then you multiply by $$-i$$ to get pauli, so that you can
+              have real eigenvalues and have your signs match up. Check this
+              reference, Physics from Symmetry, in the chapter called "Lie Group
+              Theory", and the trick is explained in appendix B.4.2. https://books.google.com/books?id=bipBDwAAQBAJ&pg=PA44&lpg=PA44&dq=anti-hermitian+matrix+rotation+generator&source=bl&ots=tn9REGkVBb&sig=ACfU3U22cV0hZlmzlUQhoZNEmOrupBVX_w&hl=en&sa=X&ved=2ahUKEwi_mLmxnObpAhXUv54KHVg7DTgQ6AEwA3oECAcQAQ#v=onepage&q=anti-hermitian%20matrix%20rotation%20generator&f=false
+
+                - Woah, this is from [[Jakob Schwichtenberg]]!! [[Book: Physics from
+                  Symmetry]], amazing.
+
+        - What to do next? I can practice getting Mathematica working in
+          org-mode, so that I can at least publish a blog post with the good
+          stuff.
+
+    - Okay, we can break any rotation down into an axis-angle formulation.
+
+    - Rotation essay:
+      https://www.reed.edu/physics/faculty/wheeler/documents/Quantum%20Mechanics/Miscellaneous%20Essays/Angular%20Momentum,%20Spin/D3.%20Spin%20Matrices.pdf
+
+    - This is where I first got the idea of the rotation operators:
+      http://www.vcpc.univie.ac.at/~ian/hotlist/qc/talks/bloch-sphere-rotations.pdf
+
+    - notes about spin rotation:
+      http://bohr.physics.berkeley.edu/classes/221/1011/notes/spinrot.pdf
+
+    - Why do we get a rotation matrix when we exponentiate?
+        - https://www.geometrictools.com/Documentation/RotationsFromPowerSeries.pdf
+
+        - Generator of the rotations about an arbitrary axis:
+          https://www.physik.uni-bielefeld.de/~borghini/Teaching/Symmetries/12_15.pdf
+
+            - The key seems to be in understanding Rodrigues’ Formula:
+              https://en.wikipedia.org/wiki/Rodrigues%27_formula#:~:text=In%20mathematics%2C%20Rodrigues'%20formula%20(,Carl%20Gustav%20Jacobi%20(1827).&text=The%20term%20is%20also%20used,formulas%20for%20other%20orthogonal%20polynomials.
+
+        - ![](https://firebasestorage.googleapis.com/v0/b/firescript-577a2.appspot.com/o/imgs%2Fapp%2Fsritchie%2Fd8uZbo0HLm.png?alt=media&token=92fc5d7e-9122-44c1-adc5-690f080febea) from http://www2.ece.ohio-state.edu/~zhang/RoboticsClass/docs/LN3_RotationalMotion.pdf
+            - In this, we want $$\omega$$ to be the cross-product matrix with
+              the rotation vector.
+
+    - I'm almost there. how do we go back and forth between an axis and the rotation matrix representation?
+        - https://en.wikipedia.org/wiki/Rotation_matrix#:~:text=Every%20rotation%20matrix%20must%20have,constant%2C%20only%20one%20real%20eigenvector.
