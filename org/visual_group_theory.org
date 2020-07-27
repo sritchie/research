@@ -1,0 +1,14 @@
+# -*- eval: (org-num-mode 1); org-download-image-dir: "images"; -*-
+#+title: Visual Group Theory
+#+subtitle: Computational Physics!
+#+startup: indent num
+#+date: 2020-05-26*
+
+Notes and exercises from Visual Group Theory.
+
+* References
+
+- NICE, asymptote mode for emacs, for visual group theory
+  https://orgmode.org/worg/org-contrib/babel/languages/ob-doc-asymptote.html
+- https://rgoswami.me/posts/org-mathematica/ Mathematica in org mode, best setup
+  for now! I can use this for doing the graph visualizations.

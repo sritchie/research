@@ -1,0 +1,177 @@
+# -*- eval: (org-num-mode 1); org-download-image-dir: "images"; -*-
+#+title: Lisp In Small Pieces
+#+subtitle: L.I.S.P, Compilers and Interpreters
+#+startup: indent num
+#+date: 2020-05-26
+
+Notes and exercises from the book.
+
+* The Basics of Interpretation
+
+This was so good! Let me just sketch out what we have.
+
+First, some basic aliases that make Clojure look more like Scheme. This was for
+my first attempt, where I tried to make my interpreter look more like the book.
+Later, I found [[https://gist.github.com/fogus/3354936][Michael Fogus's notes]], and realized that I should be writing this
+level using idiomatic Clojure, then coming back later to write the interpreter
+again in itself.
+
+Well, let's get on with it. First, the namespace and code:
+
+#+begin_src clojure
+(ns lisp.ch1
+  (:require [clojure.test :refer [deftest is]]))
+#+end_src
+
+#+RESULTS:
+: nil#'lisp.ch1/atom?#'lisp.ch1/car#'lisp.ch1/cdr#'lisp.ch1/cadr#'lisp.ch1/cddr#'lisp.ch1/caddr#'lisp.ch1/cdddr#'lisp.ch1/cadddr
+
+Then the interpreter from page 7, plus all the surrounding code.
+
+#+begin_src clojure
+(def the-false-value false)
+(def empty-begin 813)
+
+(def autoquoted?
+  (some-fn number? string? char? boolean? vector?))
+
+(def -atom?
+  (some-fn autoquoted? symbol?))
+
+(defn lookup [e env]
+  (let [bindings @env]
+    (if (contains? bindings e)
+      (e bindings)
+      (wrong "No such binding" e))))
+
+(comment
+  (defn eprogn [[expr & tail] env]
+    (if expr
+      (if tail
+        (do (evaluate expr env)
+            (recur tail env))
+        (evaluate expr env))
+      '())))
+
+(defn eprogn [[expr & tail] env]
+  (if expr
+    (if tail
+      (do (evaluate expr env)
+          (recur tail env))
+      (evaluate expr env))
+    empty-begin))
+
+(defn update! [id env v]
+  (if (contains? @env id)
+    (do (swap! env assoc id v)
+        v)
+    (wrong "No such binding" id)))
+
+(defn evlis [forms env]
+  (map #(evaluate % env) forms))
+
+(defn invoke [f args]
+  (if (fn? f)
+    (f args)
+    (wrong "Not a function" f)))
+
+(defn -extend [args values env]
+  (let [bindings @env]
+    (atom
+     (cond (symbol? args) (assoc bindings args values)
+           (= (count args) (count values))
+           (into bindings (zipmap args values))
+           :else (wrong "Too many values" values)))))
+
+(defn make-function [args body env]
+  (fn [values]
+    (eprogn body (-extend args values env))))
+
+(defn evaluate
+  "The environment here is represented as a clojure "
+  [e env]
+  (if (-atom? e)
+    (cond (symbol? e) (lookup e env)
+          (autoquoted? e) e
+          :else (wrong (str "Cannot evaluate " e)))
+    (let [[head & [second third fourth :as tail]] e]
+      (case head
+        quote second
+        if (if (not= the-false-value (evaluate second env))
+             (evaluate third env)
+             (evaluate fourth env))
+        begin (eprogn tail env)
+        set! (update! second env (evaluate third env))
+        lambda (do (make-function second (rest tail) env))
+        (invoke (evaluate head env)
+                (evlis tail env))))))
+#+end_src
+
+#+RESULTS:
+: #'lisp.ch1/the-false-value#'lisp.ch1/empty-begin#'lisp.ch1/autoquoted?#'lisp.ch1/-atom?#'lisp.ch1/lookupnil#'lisp.ch1/eprogn#'lisp.ch1/update!#'lisp.ch1/evlis#'lisp.ch1/invoke#'lisp.ch1/-extend#'lisp.ch1/make-function#'lisp.ch1/evaluate
+
+Now we can go in order and start implementing functions.
+
+#+begin_src clojure
+(def atom? (complement list?))
+(def pair? (complement atom?))
+(def car first)
+(def cdr rest)
+
+(defn wrong [s e]
+  (throw (RuntimeException. (str s " " e))))
+#+end_src
+
+This lets =begin= work, as described on pages 9 and 10:
+
+#+begin_src clojure
+(def empty-begin 813)
+
+(defn eprogn [exps env]
+  (if (pair? exps)
+    (if (pair? (cdr exps))
+      (do (evaluate (car exps) env)
+          (eprogn (cdr exps) env))
+      (evaluate (car exps) env))
+    empty-begin))
+#+end_src
+
+The above doesn't flow since I decided to just implement. More later. Here are
+the tests:
+
+#+begin_src clojure
+;; test cases! This currently gets us into a stackoverflow situation. Validate
+;; that there is actually something here.
+
+(deftest ch1
+  (is (thrown? StackOverflowError
+               (evaluate '(if false 2) (atom {'fac 1}))))
+
+  "Example cases from https://gist.github.com/fogus/3354936"
+
+  (is (= 42 (evaluate 'a (atom '{a 42}))))
+
+  (is (= 'a (evaluate '(quote a) (atom '{a 42}))))
+
+  (is (= 'b (evaluate '(begin (quote a) (quote b))
+                      (atom '{a 42}))))
+
+  (is (= 42 (evaluate 42 (atom '{a 42}))))
+
+  (is (true? (evaluate true (atom '{a 42}))))
+
+  ;; raises
+  (is (thrown-with-msg?
+       RuntimeException
+       #"No such binding b"
+       (evaluate '(set! b 36) (atom '{a 42}))))
+
+  (is (= 42 (evaluate '(begin (set! b a) (set! a 108) b)
+                      (atom '{b nil a 42}))))
+
+  (is (= 10 (evaluate
+             '(begin
+               (set! f (lambda (x y) (if b x y)))
+               (f "face" 10))
+             (atom '{f nil b false})))))
+#+end_src

@@ -4,6 +4,14 @@
 #+startup: indent num
 #+date: 2020-05-26
 
+https://rgoswami.me/posts/org-mathematica/ Mathematica in org mode, best setup
+for now! I can use this for doing the graph visualizations. I'd like to use this
+to try and show off some Mathematica code inline, vs trapping it in the
+notebook.
+
+I can definitely make a little library of code that I can include here and
+"load" when I"m doing references.
+
 * Intro
 
 I went a little bonkers yesterday, thinking about how rotations work and
@@ -102,7 +110,22 @@ So where am I?
 
 * References
 
-Logging these here for later
+Logging these here for later:
+
+- read about the axis-angle representation, and figure out the exponential map
+  https://en.wikipedia.org/wiki/Axis%E2%80%93angle_representation
+
+- constructing rotation matrices using power series
+  https://en.wikipedia.org/wiki/Axis%E2%80%93angle_representation
+
+- I THINK this holds the key to my rotation woes
+  http://www.stem2.org/je/rotation.pdf
+
+- ths wass really helpful for thinking about how the pauli matrices turn into
+  rotations:
+  https://physics.stackexchange.com/questions/510221/matrix-exponentiation-of-pauli-matrix
+
+- Rotation operators, another derivation http://bohr.physics.berkeley.edu/classes/221/1011/notes/spinrot.pdf
 
 - The [[Book: Physics from Symmetry]] page 35 has a great derivation, but the key
   here, I THINK, is that I needed to multiply the matrices by $i$ to make them
