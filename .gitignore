@@ -1,1 +1,6 @@
 ltximg
+.cpcache
+auto
+*.pdf
+*.tex
+*.edn
