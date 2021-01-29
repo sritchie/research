@@ -1,0 +1,891 @@
+#+title: AD on Higher Order Functions
+#+author: Sam Ritchie, Gerald Jay Sussman
+#+startup: indent
+#+LATEX_HEADER: \usepackage{parskip}
+#+date: 2020-01-23
+
+Gerry, I think this writeup covers everything you and I have discussed. I
+managed to get everything we talked about running in the Siskind & Perlmutter
+implementation, so this should all be maximally clear. I think they'll be
+interested in the performance improvements from your observation about skipping
+work when we're not in a nested-call situation, if nothing else!
+
+Our original goal was to figure out:
+
+- Whether to switch =D= to our simpler thing in scmutils / my port (I think no,
+  but let me know your thoughts after a read)
+- If not, how to document what's happening with the more complicated
+  implementation
+- is there a name / mathematical precedent for the alternative thing we've come
+  up with? We have the pieces. Is this new operator worth adding?
+
+And I REALLY want to hear what you think of =j*=, see notes at the end.
+
+Okay, here I go.
+
+* Goals for this document
+
+- lay out a spec for =D= as we understand it for known cases
+- describe the menu for =(D f)= where f has a range of "function"
+- document our alternative idea for the Manzyuk machinery
+- note the performance improvements from =epsilon-active?=
+- Document my confusion around domain == function, with =j*=.
+
+* The Spec for D
+
+What is the contract offered by the =D= operator? The case is clear for
+functions whose range and domain are either real numbers or aggregates of real
+numbers. Our goal is to clarify the contract offered by =D= when applied to
+higher order functions - ie, a function whose domain or range are functions.
+
+** =D= on Reals and Aggregates
+
+=D= applied to a function =f= from $\mathbb{R} \to \mathbb{R}$ returns a new
+function =f'= that maps its input =x= to the slope of the tangent line that
+represents the best linear approximation of =f= at =x=.
+
+(Said another way, multiplying an incremental input =dx= by the quantity =((D
+f) x)= produces a proportional increment in the value of =f= at =x=.)
+
+=D= applied to a function =g= with aggregate inputs and/or outputs - for
+example, $g: \mathbb{R}^n \to \mathbb{R}^m$ satisfies the same contract. =((D g)
+x)= for some contravariant vector (up structure) =x= returns the Jacobian =J= of
+=g= at =x=. The Jacobian-vector product =(* J x)= is equivalent to an increment
+in the $m$ output values of =g= at the =n=-dimensional input =x=.
+
+=D= applied to a function =h= of $n > 1$ arguments is treated as a function of a
+single =n= dimensional argument.
+
+** =D= with function range
+
+[[https://arxiv.org/pdf/1211.4892.pdf][Manzyuk et al. 2019]] extends =D= to functions =f= of type $\mathbb{R}^n
+\rightarrow \alpha$, where
+
+#+begin_export latex
+\alpha::=\mathbb{R}^m \mid \alpha_{1} \rightarrow \alpha_{2}
+#+end_export
+
+By viewing
+
+- =f= as a (maybe curried) multivariable function that /eventually/ must produce
+  an $\mathbb{R}^m$
+- The derivative =(D f)= as the partial derivative with respect to the first
+  argument of =f=
+
+  A 3-level nest of functions will respond to =D= just like the flattened,
+  non-higher-order version would respond to =(partial 0)=. In other words, these
+  two forms evaluate to equivalent results:
+
+  #+begin_src scheme
+(let ((f (lambda (x)
+           (lambda (y)
+             (lambda (z)
+               (* x y z))))))
+  ((((D f) 'x) 'y) 'z))
+;;=> (* y z)
+
+(((partial 0) *) 'x 'y 'z)
+;;=> (* y z)
+  #+end_src
+
+If you keep calling the functional return values of =((D f) x)= until you get a
+non-function, the result should match the result of =(((partial 0) f) x ...)= if
+you passed all the arguments in at once.
+
+** Manzyuk and Nested Functions
+
+Here is a subtlety that took me a while to understand about the Manzyuk et al
+implementation:
+
+If =(f x)= returns a function, then that function closes over a reference to
+=x=. If you engineer an example (see Alexey's Amazing Bug, coming up) where:
+
+- this function takes another function, which then receives the closed-over =x=
+  as an argument
+- you pass this function to itself, so the closed-over =x= instances can both be
+  multiplied
+
+Then your program isn't going to make any distinction between the instances of
+=x=. They're both references to the same value.
+
+HOWEVER! =((D f) x)= returns a function which, when you eventually provide all
+arguments, will return the sensitivity of =f= to the first argument =x=.
+
+If you perform the trick above, pass =((D f) x)= into itself, and the =x=
+instances meet (multiply, say) - should final return value treat them as the
+/same/ instance?
+
+Manzyuk et al says /NO!/. If =((D f) x)= returns a function, that function
+closes over:
+
+- the value of =x=
+- an /intention/ of sorts to start the derivative-taking process on that
+  isolated copy of =x= once the final argument is supplied.
+
+** Example: Alexey's Amazing Bug
+
+=arg-shift= Takes some =g: R -> R= and returns a new function that acts like
+=g=, but adds =offset= to its input before calling =g=:
+
+#+begin_src scheme
+;; R -> ((R -> R) -> (R -> R))
+(define (arg-shift offset)
+  (lambda (g)
+    (lambda (a) (g (d+ a offset)))))
+#+end_src
+
+The multivariable equivalent is:
+
+#+begin_src scheme
+;; (R -> (R -> R) -> R) -> R
+(define (arg-shift-multi offset g a)
+  (g (d+ a offset)))
+#+end_src
+
+Treat this as a curried multivariable function by providing all arguments, and
+receive the expected =(exp 8)=:
+
+#+begin_src scheme
+((((d arg-shift) 3) dexp) 5)
+;;=> (exp 8)
+#+end_src
+
+Now force a situation where both the =(R -> R)= argument and the function
+receiving it /both/ come from the same call to =((d arg-shift) 3)=, and
+therefore both have a partial derivative "pending" from the initial =3=
+argument:
+
+#+begin_src scheme
+;; (R -> R) -> (R -> R), derivative pending from 3
+(define f-hat ((d arg-shift) 3))
+
+;; (R -> R), derivative pending from 3
+(define f-arg (f-hat dexp))
+
+((f-hat f-arg) 5)
+;;=> (exp 11) in Manzyuk
+#+end_src
+
+The result is =(exp 11)= because each "derivative pending" from 3 triggers a
+different derivative-taking process when the final =5= is supplied.
+
+The Manzyuk implementation is a referentially transparent implementation of =D=.
+It allows the above result to be identical to the form below, with all =define=
+bindings replaced by their values:
+
+#+begin_src scheme
+((((d arg-shift) 3)
+  (((d arg-shift) 3) dexp))
+ 5)
+;;=> (exp 11)
+#+end_src
+
+Referential transparency requires that each =3= trigger a different derivative
+computation.
+
+** So what's the problem?
+
+This is a totally reasonable definition of the derivative! But I (Sam) found it
+to be confusing, which led to some interesting experimentation by me and GJS
+that's worth at least writing down.
+
+The trigger was an innocent (I promise!) restructuring of the computation, that
+didn't change the final non-function /value/ at any value of the =(offset, dexp,
+a)= arguments, but did change the result of the derivative.
+
+Modify =arg-shift= by making the second argument a continuation that receives
+the rest of the expression and returns the final result:
+
+#+begin_src scheme
+;; R -> (((R -> R) -> (R -> R)) -> R)
+(define (arg-shift offset)
+  (lambda (cont)
+    (cont
+     (lambda (g)
+       (lambda (a) (g (d+ a offset)))))))
+#+end_src
+
+This definition of =arg-shift= is now equivalent to a curried two-argument
+function. =((D arg-shift) offset)= takes a function =cont= which receives a
+value identical to =f-hat=.
+
+The difference is, because =cont= is evaluated /inside/ the body of the new
+=arg-shift=, it can use its =f-hat= multiple times and the augmented =x= values
+will contribute identically to the returned derivative. (Totally sensible!)
+
+#+begin_src scheme
+;; ((R -> R) -> (R -> R)) -> R
+(define (cont f-hat)
+  ((f-hat (f-hat dexp)) 5))
+
+(((d arg-shift) 3) cont)
+;;=> (* 2 (exp 11))
+#+end_src
+
+The result is now =(* 2 (exp 11))=. Because =f-hat= was used twice /inside/ the
+body of the function returned by =((d arg-shift) 3)=:
+
+  - both copies of =f-hat= started their derivative-taking process separately,
+    using separate tags internally
+  - the act of /crossing the right paren/ forced these two derivatives back
+    together
+
+This second bullet was the bug in my first email to the group! It manifested, if
+you'll recall, as an un-stripped dual number getting returned (or two clashing
+tags in the tag set, in the =scmutils= case).
+
+What did I expect to happen? I wanted both implementations to return =(* 2 (exp
+11))=, because I thought the program restructuring shouldn't change the result.
+I see now why this would be confusing and incorrect behavior for =D=.
+
+=((D arg-shift) offset)= returns a function of =g= and =a= that, when called,
+should return the derivative of =g= at =a + offset=. It should /not/ matter how
+you calculate =a=!
+
+In particular, If =a= happens to come from applying the same instance of =((D
+arg-shift) offset)= to some different pair, like =h= and =b=, the offsets had
+better not be treated like the same variable.
+
+** Is there another way?
+
+The original bug in Alexey's Amazing bug shows up in equation (12m) of Manzyuk
+et al; both =f-hat= instances attempted to extract the same epsilon, and the
+outer instance found nothing and returned =0=. The tag replacement machinery in
+the paper both solves this problem and prevents different nested =f-hat= calls
+from confusing their perturbations.
+
+There is a different way to solve the bug:
+
+- Break referential transparency and make the user start the derivative-taking
+  process with an explicit side effect - a call to the function returned by =(D
+  f)=.
+- If =((D f) x)= returns a function, let the closed-over, augmented =x=
+  instances "cross-talk" in nested examples.
+- Keep an explicit stack of in-progress tags
+- If a derivative-taking function sees (during execution) that its tag is
+  already on the stack, pass its result back up un-extracted.
+
+This approach would behave identically for all higher-order-function examples
+that don't nest.
+
+First, what the new results would "mean"; then how to make it work (and a couple
+of efficiency improvements to the Manzyuk implementation that come from the
+stack idea!)
+
+*** Semantics / Meaning
+
+The semantics above would let you measure the sensitivity of numbers you produce
+from an arbitrary execution graph to some explicitly tagged input.
+
+As an example:
+
+#+begin_src scheme
+(let* ((offset 3)
+       (f-hat ((d arg-shift) offset)))
+  (list
+   ((f-hat dexp) 5)
+   ((f-hat (f-hat dexp)) 5)
+   ((f-hat (f-hat (f-hat dexp))) 5)))
+;;=> ((exp 5) (* 2 (exp 11)) (* 3 (exp 14)))
+#+end_src
+
+Each of the entries in the list /would respond/ with a larger-by-one constant
+factor to an incremental change in offset! And this seems like a totally
+reasonable tool to want.
+
+If you want the sensitivity of the whole =((f-hat (f-hat exp) 5)= computation to
+the single knob attached to "3" - if you want the increment in the result to an
+increment in that single "3" - the =(* 2 (exp 11))= is the right answer, since
+an increment will affect both nested calls together.
+
+If instead you are looking for an increment in the =((f-hat ....) 5)= given an
+increment in its "3" value (independent of whatever you pass in for ...), then
+=(exp 11)= is right. Wiggling the outer "3", if the inner =(f-hat exp)='s value
+stays pinned at "3", should give you =(exp 11)= sensitivity.
+
+It's /not/ referentially transparent, because different calls to =(d arg-shift)=
+start separate derivative-taking processes. This is called out as an explicit
+no-no in equation 15 of Manzyuk et al.
+
+But after the first argument is passed to =(D f)=, the user is free to structure
+their program (move the parentheses) in any way they like. They'll always get
+the same result.
+
+If your goal is to track the program's sensitivity to changes in the argument to
+=(D arg-shift)=, then you need the ability to explicitly distinguish calls:
+
+#+begin_src scheme
+(let* ((offset 3)
+       (f-hat1 ((d arg-shift) offset))
+       (f-hat2 ((d arg-shift) offset)))
+  (list
+   ((f-hat1 dexp) 5)
+   ;; two separate f-hat instances
+   ((f-hat2 (f-hat1 dexp)) 5)
+
+   ;; one f-hat1, two f-hat2 gives a 2x factor
+   ((f-hat2 (f-hat2 (f-hat1 dexp))) 5)))
+;;=> ((exp 5) (exp 11) (* 2 (exp 14)))
+#+end_src
+
+Or maybe you can think of this as a derivative on a sub-graph of a program
+you're defining on the fly, from the inside. (is "Calculus on Graphs" a defined
+thing?)
+
+If =(f x)= returns a function, think of this like a source in the graph of a
+program's execution.
+
+Functional return values make new nodes, and non-function return values are
+sinks.
+
+- =((D f) x)= is still the partial derivative with respect to some input in an
+  =R^n => R^m= function
+- The other =n-1= inputs are the inputs to each of the higher order functions
+- each of the =m= outputs comes from calling one of =m= functions that branched
+  out from your original =((D f) x)=.
+
+Maybe this is a stretch.
+
+*** Implementation
+
+I've implemented this in =implementation_updated.ss=, using the flag
+=*fix-three?*=.
+
+The key idea is the =*active-epsilons*= stack. Each time a derivative-taking
+higher-order function is applied to fresh arguments, it does this via
+=with-active-epsilon=. Then any nested call looking to extract the same
+=epsilon= will see =(epsilon-active? epsilon)= return =#t=.
+
+#+begin_src scheme
+(define *active-epsilons* '())
+
+(define (epsilon-active? epsilon)
+  (memq epsilon *active-epsilons*))
+
+(define (with-active-epsilon epsilon f arg)
+  (let ((old *active-epsilons*))
+    (set! *active-epsilons* (cons epsilon *active-epsilons*))
+    (let ((result (f arg)))
+      (set! *active-epsilons* old)
+      result)))
+#+end_src
+
+This actually gives a nice savings in the =prim= implementation, spotted by GJS.
+You only need to perform a tag substitution if some function above you is
+waiting for the same tag. Otherwise, instances of your tag can't get in via your
+arguments.
+
+I've implemented these under a =*save-work?*= flag. Here's the =prim= change:
+
+#+begin_src scheme
+(lambda (y)
+	(if (epsilon-active? epsilon)
+      (let ((epsilon2 (generate-epsilon)))
+	      (subst epsilon
+		           epsilon2
+		           (prim epsilon
+                     (with-active-epsilon
+                      x (subst epsilon2 epsilon y)))))
+
+      ;; Easy and cheap!
+      (prim epsilon (with-active-epsilon x y))))
+#+end_src
+
+A similar change in =subst= saves a function substitution work if no one is
+waiting on its epsilon:
+
+#+begin_src scheme
+(if (epsilon-active? epsilon)
+    (let ((epsilon3 (generate-epsilon)))
+	    (subst epsilon2 epsilon3
+		         (subst epsilon1 epsilon2 (x (subst epsilon3 epsilon2 y)))))
+    ;; Do the easy thing!
+    (subst epsilon1 epsilon2 (x y)))
+#+end_src
+
+Maybe there is something we can say about complexity guarantees now, as a
+function of
+
+- input dimension
+- nesting level
+
+I'll leave that as an exercise for the reader!
+
+The only other change is =extract-fix-three=, similar to =tg= but only called by
+the =d= implementation:
+
+#+begin_src scheme
+(define (extract-fix-three epsilon x)
+  (cond ((dual-number? x)
+         ;; If tg is attempting to extract an epsilon that a higher level is
+         ;; waiting for, (tg epsilon x) acts as (identity x).
+         (if (epsilon-active? epsilon)
+             x
+             (tg epsilon x)))
+
+        ;; The returned procedure calls (x y) with epsilon marked as active.
+        ;; Inside that (x y) call, the (epsilon-active? x) branch in the (dual-number? x)
+        ;; case above will return true.
+        ((procedure? x)
+         (lambda (y)
+           (extract-fix-three epsilon (with-active-epsilon epsilon x y))))
+
+        ;; All other cases are identical to a call to tg.
+        (else (tg epsilon x))))
+#+end_src
+
+=d= calls this instead of =tg= to extract its result:
+
+#+begin_src scheme
+(let ((epsilon (generate-epsilon)))
+	(extract-fix-three epsilon (f (create-dual-number epsilon x 1))))
+#+end_src
+
+=implementation_updated.ss= has tests and usage examples of this new thing.
+
+*** Request for Jeff, Barak's Comment
+
+Jeff, Barak - is this a good tool to add to the toolbox? I'm sure you've thought
+about some operation with these semantics. I agree that your semantics are best
+for what we call =D=. Is there a nice name for this operation of turning a
+function into a generator of sensitivities, or something like that?
+
+*** Middle Ground between Two Extremes
+
+These are two extremes. You could also write a =fork= function that explicitly
+introduced the Manzyuk behavior, by switching the "share all instances" mode to
+"replace tag at every function boundary" mode.
+
+Manzyuk implicitly calls =fork= every time a returned function is called. We
+never call it. Some more enlightened library author might use this to build a
+custom sensitivity-measuring thing and then provide it to the user; this would
+recover the "curried derivative" idea with more flexibility.
+
+You might also /warn/ the user if:
+
+- you're in Ritchie/GJS mode
+- a function with tag =tag= gets called when =(epsilon-active? tag)= returns
+  =#t=, signaling a nested call
+
+This is the only case where behavior would be different. They could resolve the
+warning by:
+
+- explicitly calling =fork= on the nested function, or by
+- wrapping the computation in a form that sets the =*warn?*= variable to =#f=
+  within its scope
+
+** Can we make the "epsilon" side effect completely explicit?
+
+GJS wondered aloud - can we get our referential transparency back by making tag
+assignment explicit, and defaulting to =gensym= generation?
+
+I think this is a hard /no/, after much thought. I am convinced that you can't,
+in general, open up tag assignment to the user and still call the function =D=.
+There is almost nothing the user can /do/ with the tag they've explicitly
+chosen, since the call to =extract= is hidden inside =D=.
+
+The only valid way to use an explicit tag is to force distinct calls to =((D f)
+x)= to use the same tag for the same =x=.
+
+You could ALMOST do this automatically by memoizing the gensym on the =x=,
+argument as Jeff suggested. But you can never memoize on the function's /value/,
+just the particular reference you have in hand:
+
+#+begin_src scheme
+(define (arg-shift offset)
+  (lambda (g)
+    (lambda (a) (g (d+ a offset)))))
+
+(let* ((df (d arg-shift))
+       (f-hat1 (df 3))
+
+       ;; These two cases will result in `f-hat2` tracking a different or the
+       ;; same tag (respectively) as `f-hat1`:
+       (f-hat2 (df 3))
+       (f-hat2 f-hat1)
+
+       ;; If you memoize tag assignment on 'x==3', you'd always get the same
+       ;; tag. But if each (d arg-shift) has its own memoization cache then
+       ;; THESE two forms would act differently, pushing the referential
+       ;; transparency problem back up one level:
+       (f-hat2 (df            3))
+       (f-hat2 ((d arg-shift) 3))
+
+       ;; And as Jeff pointed out, you can't memoize on a function, since
+       ;; function equality is undecidable.
+       )
+  ((f-hat1 (f-hat2 dexp)) 5))
+#+end_src
+
+What can go wrong? (All of these only apply to the Ritchie/GJS semantics;
+Manzyuk forces fresh tags at every level so it doesn't matter what you assign.)
+
+*** Same tag, different values
+
+#+begin_src scheme
+(let ((f-hat1 ((D f) x 0))
+      (f-hat2 ((D f) y 0))) ...)
+#+end_src
+
+In /distinct/ argument positions, this technique gives you a directional
+derivative. But I don't think there's any way to make sense of the results as a
+"derivative" if you cook up a situation like this, with two distinct values
+lifted into the same tangent space from the same argument position, and then
+allow the values to mingle with =((f-hat1 (f-hat2 exp)) 5)=.
+
+NOTE: I think this happens in the =j*= examples I've cooked up below! But I
+probably need more de-confusion.
+
+*** Nested tag clashing
+
+You might choose a tag already in play at a level above you. You could solve
+this by maintaining a global map of ={user-tag -> (fresh-tag)}=, so at least
+you'd never clash with a gensymmed tag.
+
+*** Trouble with the Jacobian
+
+The Jacobian calculation on a higher order function is a more complicated beast;
+the Jacobian is a structure like the input structure (of opposite variance),
+where each entry is the partial derivative.
+
+If each entry is a function, then if you:
+
+- explicitly supply tags
+- supply identical tags to different entries
+- tangle different entries
+
+Then I don't know how to interpret the output-tangling. If you tangled entries
+that shared tags you would end up with a curried directional derivative of those
+entries. This feels like something to forbid!
+
+** What about Reverse Mode?
+
+Reverse mode has the two same semantic extremes, for the same reasons. You can
+choose to employ the =subst= machinery to keep inputs separate, or allow them to
+cross-talk.
+
+I /do/ think that the =*active-epsilons*= stack will make it simple to tie-break
+between =tape-cell= and =dual-number=. The question of "do I put the dual into
+the tape cell, or vice versa?" is resolved by deciding which tag is currently in
+play. One way to decide is to force a global ordering of gensymmed tags (by
+using a timestamp for example). Then the greater of the two tags is the one in
+play.
+
+A dynamic variable stack makes it explicit what epsilon is associated with your
+current level of nesting. This makes it easier in mixed-mode AD to decide, when
+combining a dual number with a tape, which epsilon is currently in play.
+[[https://github.com/qobi/R6RS-AD/blob/master/AD.ss#L78][=lift-real*real->real= in R6RS-AD]] provides a nice example of code that would
+become simpler.
+
+* j* observations, notes
+
+- [ ] OH BOY, there are more semantic weirdnesses cropping up with the j*
+  operator. I documented this on Github. Go through it with GJS. It shows how
+  deeply finicky all of this stuff is. I don't think tag replacement is doing
+  anything; and I managed to make it all work the way it IS supposed to, but
+  it's not totally clear why it is failing.
+
+- [ ] there is definitely some weird similarity here to Lantern, reverse-mode
+  continuation passing style...
+
+* Notes to File, Miscellany
+
+** Multiplying a function by an increment
+
+In either interpretation, if you adopt the =scmutils= semantics for "scalar *
+function", then multiplying an increment by a functional return value of =((D f)
+x)= DOES produce an increment in the result... when you finally get a
+non-function result!
+
+You're effectively scaling any eventual output by the incremental input. This
+makes sense because the eventual non-function outputs represent sensitivities of
+that output to the original =x=.
+
+** Return function value and sensitivity?
+
+If you want to implement a function that returns both the function value AND the
+sensitivity, don't return the entire pair until the end. (OR you could return a
+pair at each step, always offering a chance to bail out of the tangent graph?)
+
+** Equality, identity
+
+What does all of this have to do with equality? The derivative with OUR thing is
+not a referentially transparent operator because it's tied up with how you build
+your program graph. Say you let-bind some =x= to =a1= and =a2=, then call =((D
+f) a1)= and =((D f) a2)=. Each call will give you the sensitivity to its
+binding without knowing that =a1= equals =a2=.
+
+- [ ] SHOULD derivative be referentially transparent? Not in the "Calculus on
+  Graphs" interpretation, since you want the sensitivity of a graph. Making the
+  graph larger by currying, for example, should change the sensitivities of the
+  now-different outputs.
+
+- [ ] this makes me think of the "Markov Property". If you declare that no value
+  can depend on any previous state, then you CAN in fact memoize =((D f) x)= on
+  =x=. Value equality now suffices in, say, a Markov decision process. (You
+  still can't memoize on =f= with value equality, but maybe reference equality
+  is fine!)
+
+** Calculus on Graphs
+
+I think Manzyuk et al.'s interpretation is the right one for =D=. Is there some
+legitimate mathematical thing that the Ritchie/GJS approach encodes?
+
+Maybe something like "Calculus on Graphs". In that case, if you change the
+program graph, you're going to change the sensitivities, obviously. So this
+should NOT be a referentially transparent action.
+
+THIS feels like it can't be a new idea - derivatives of DAGs with respect to
+some node. Or maybe it's analogous to an obvious thing and I'm not seeing it?
+
+If =(f x)= returns a function, think of this like a source in the graph
+(sub-graph? sub-DAG?) of a program's execution.
+
+Functional return values make new nodes, and non-function return values are
+sinks.
+
+- =((D f) x)= is still the partial derivative with respect to some input in an
+  =R^n => R^m= function
+- The other =n-1= inputs are the inputs to each of the higher order functions
+- each of the =m= outputs comes from calling one of =m= functions that branched
+  out from your original =((D f) x)=.
+
+You have a vector-valued function, but you are getting each of the "m" results
+from separate functions, and therefore at different places in your program.
+
+This feels like a powerful tool! I have some =x= that I can adjust, and many
+different outputs I care about that all depend on the same =x=. =((d
+current-continuation) x)=, for example, gives me the sensitivity of the entire
+rest of my program to =x=. Of course you might want to sample intermediate
+sensitivities along the way! And that's what our semantics allow.
+
+** What if we call D on return value?
+
+Interesting example... if =((D f) x)= returns a function, calling =D= on /that/
+gets you a function that will eventually produce a mixed partial:
+
+#+begin_src scheme
+(let* ((f (lambda (x)
+            (lambda (y)
+              (lambda (z)
+                (* x x y y z z)))))
+       (df  (D f))
+       (dfx (D (df 'x))))
+  (simplify
+   ((dfx 'y) 'z)))
+;;=> (* 4 x y (expt z 2))
+#+end_src
+
+** j* Interpretation
+
+Manzyuk et al. introduces the =j*= operator in section 9. How is it supposed to
+act? In contrast to =D=, the function returned by =(j* f)= takes a primal /and/
+a tangent component. If you pass =x, 1=, you recover the behavior of =D=.
+
+But you can also pass a function and its derivative as =x, x'=. What does that
+mean?
+
+My read is that =((j* f) x x')= on a functional =x, x'= returns a function that
+will augment its argument before passing it to =x= (and passing the whole result
+to =f=).
+
+This is basically the example from the paper:
+
+#+begin_src scheme
+(let ((curried-map (lambda (f)
+                     (lambda (xs) (map f xs)))))
+  (((j* curried-map) square (D square))
+   (list 5 10)))
+;;=> (10 20)
+#+end_src
+
+The =f= passed to =curried-map= is a version of =square= that augments its
+argument. Wonderful!
+
+*** Tag Replacement not doing anything in j*
+
+=j*=takes a continuation of some argument, and gives you back a new function
+that calls the continuation with its argument augmented by some tag. In the
+implementation they seem to want each invocation to act on a DISTINCT tag; the
+paper performs a tag-replacement step before and after.
+
+#+begin_src scheme
+(lambda (y)
+	(let ((epsilon2 (generate-epsilon)))
+	  (subst epsilon epsilon2
+		       (bun epsilon
+			          (x (subst epsilon2 epsilon y))
+			          (x-prime (subst epsilon2 epsilon y))))))
+#+end_src
+
+But I am fairly convinced that this is doing nothing. How can it be? Tag
+replacement only makes sense with =D= because you extract =tag= out before
+substituting =fresh= back in for =tag=. Here, we swap and swap back.
+
+This implementation is equivalent:
+
+#+begin_src scheme
+(lambda (y)
+	(bun epsilon (x y) (x-prime y)))
+#+end_src
+
+*** Higher Order j*
+
+What if, instead of =square=, we passed some function that expected another
+function?
+
+I have struggled with this all day, trying to think through what should happen.
+My intuition is that the =D= behavior was very clear - every non-function input
+should get its own tag.
+
+Here are concrete examples. These also live and run at the bottom of
+=implementation_updated.ss=. These did not run with the =j*= implementation in
+the paper. I had to make a change to allow for a single-argument call to the
+function returned by =j*= that would fill in an appropriate =x'=. Here is =j*=:
+
+#+begin_src scheme
+(define (j* f)
+  (lambda (x)
+    ;; I am not sure if this is well founded... but I had to make this change to
+    ;; get the nested j* examples to work. I also had to remove the x-prime
+    ;; argument from the eta-expansion, procedure branch below.
+    (let ((x-prime (if (procedure? x) (j* x) 1)))
+      (if *eta-expansion?*
+          (if (procedure? (f x))
+	            ;; Equation (32a)
+	            (lambda (y) ((j* (lambda (x) ((f x) y))) x))
+	            ;; Equation (32b)
+	            (let ((epsilon (generate-epsilon)))
+	              (tg epsilon (f (bun epsilon x x-prime)))))
+          ;; Equation (33)
+          (let ((epsilon (generate-epsilon)))
+            (tg epsilon (f (bun epsilon x x-prime))))))))
+#+end_src
+
+Now, the examples. First, take two definitions from the Amazing Bug section
+above:
+
+#+begin_src scheme
+(define (arg-shift offset)
+  (lambda (g)
+    (lambda (a) (g (d+ a offset)))))
+
+(define (arg-shift-cont offset)
+  (lambda (cont)
+    (cont (lambda (g)
+            (lambda (a) (g (d+ a offset)))))))
+#+end_src
+
+This is the continuation we've been using in the examples above:
+
+#+begin_src scheme
+(define (cont f-hat)
+  ((f-hat (f-hat dexp)) 5))
+#+end_src
+
+Next, define a function like =arg-shift-cont=, but with =cont= at the top level
+and =offset= down one level. (GJS, is there some name for this transformation?)
+
+#+begin_src scheme
+(define (arg-shift-cont-flipped cont)
+  (lambda (offset)
+    (cont
+     (lambda (g)
+       (lambda (a) (g (d+ a offset)))))))
+#+end_src
+
+My understanding of the semantics of passing a function g to =(j* f)= is:
+
+- if =g= takes some number =x=, the function will internally produce its
+result =(g x)= in the form of a dual of =(g x) + ((d g) x)*dx=.
+
+In other words, whenever =g= is called it tags its input with =dx=, so =dx=
+bubbles up through =(g x)=.
+
+But this is example goes one level deeper, and is more confusing (at this
+moment!). The example might be one of the laws of =j*=. Flip the outer two
+calls, and the answer stays the same:
+
+#+begin_src scheme
+(((j* arg-shift-cont) 3) cont)
+;;=> (* 2 (exp 11))
+
+(((j* arg-shift-cont-flipped) cont) 3)
+;;=> (* 2 (exp 11))
+#+end_src
+
+This is already sort of mind-bending:
+
+- =(j* arg-shift-cont-flipped)= receives =cont=, a function
+- this returns =(tg epsilon (f (bun epsilon cont (j* cont))))=, which is a
+  function of =offset=
+- =(bun epsilon cont (j* cont))= is a function that is waiting to augment its
+  argument. If it receives a function, that function waits to augment /its/
+  argument, on down until finally it receives a number...
+- In this example, if you track the calls inside of =cont=, it is actually the
+  final =a= argument that is augmented!
+
+AND, crucially, the =a= argument for BOTH nested calls gets tagged with the same
+outer tag. Is that right? Or should they each receive their own tag, and be
+treated as mixed partials if they combine?
+
+We get the same answer with eta expansion and tag substitution.
+
+**** Tougher Example
+
+I don't have a good mental model for the next example. Take =cont2=:
+
+#+begin_src clojure
+(define (cont2 d-shift)
+  (let ((f-hat1 (d-shift 1))
+        (f-hat2 (d-shift 2)))
+    ((f-hat1 (f-hat2 dexp)) 2)))
+#+end_src
+
+=cont2= takes a function like =arg-shift= and makes two separate calls with
+inputs 1 and 2. Then it makes the same nested calls that =cont= does.
+
+Now do this:
+
+#+begin_src scheme
+((j* cont2) arg-shift)
+;;=> (* 2 (exp 5))
+#+end_src
+
+The =offset= argument in =arg-shift= is the non-function end of the line for
+=j*=, so any =offset= argument gets tagged with the same =dx=. The factor of 2
+comes in because /both/ =1= and =2= are augmented with the same tag, so their
+perturbations combine.
+
+If I flip the arguments and call =j*= on =arg-shift=, I don't get the factor of
+2 because =(j* arg-shift)= assigns a unique tag at every call:
+
+#+begin_src scheme
+;; identical to (cont2 (d arg-shift))
+(cont2 (j* arg-shift))
+;;=> (exp 5)
+#+end_src
+
+Should separate calls to =f-hat= inside =cont2= get tagged with the /same/ tag,
+and confuse? It seems quite wrong to have two separate inputs to =d-shift= get
+lifted into the same tangent space, given the trouble we went to to make this
+/not/ happen in Manzyuk et al.
+
+But what are the right semantics?
+
+One idea is:
+
+- every non-function input gets its own tag
+- only the tag associated with a "higher-level" call like the outer =f-hat= in
+  =(f-hat (f-hat exp))= makes it out, if there is a nested call
+
+But I don't have good intuition here. Other than the feeling that this behavior
+is inconsistent. There is some CPS transformation it seems like you could write
+down to convert a =d= call into a =j*= call that should preserve the
+tag-separation.
+
+* References
+
+Manzyuk et al. 2019: https://arxiv.org/pdf/1211.4892.pdf
+
+- [ ] Add notes, description from =implementation_updated.ss=
