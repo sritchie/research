@@ -840,6 +840,35 @@ But this isn't helpful, because we're not interested in the tangent vector at
 each VALUE --- we want a tangent vector entry for each time the augmented 'f' is
 called inside g.
 
+*** Tag Replacement not doing anything in j*
+
+The implementation of =j*= in section 9 seems to want each invocation to act on
+a /distinct/ tag. The paper performs a tag-replacement step before and after
+applying =x= and =x-prime=.
+
+#+begin_src scheme
+(lambda (y)
+	(let ((epsilon2 (generate-epsilon)))
+	  (subst epsilon epsilon2
+		       (bun epsilon
+			          (x (subst epsilon2 epsilon y))
+			          (x-prime (subst epsilon2 epsilon y))))))
+#+end_src
+
+I am fairly convinced that this is doing nothing. How can it be? Tag replacement
+makes sense with the =tg= and =subst= implementations for =D= because =tag= is
+extracted out before substituting =fresh= back in for =tag=. This implementation
+simply swaps then swaps back.
+
+I believe that this implementation is equivalent:
+
+#+begin_src scheme
+(lambda (y)
+	(bun epsilon (x y) (x-prime y)))
+#+end_src
+
+Is there an example that behaves differently for these two cases?
+
 *** The Question, Summary:
 
 In summary, the directional derivative operator is the Real Thing here, and
@@ -878,215 +907,6 @@ I think this is a juicy API design question:
 
 This was a lot! Hopefully there was more meat here than fluff. Looking forward
 to hearing your thoughts post-digestion.
-
-
-** Earlier Notes
-
-Manzyuk et al. introduces the =j*= operator in section 9. How is it supposed to
-act? In contrast to =D=, the function returned by =(j* f)= takes a primal /and/
-a tangent component. If you pass =x, 1=, you recover the behavior of =D=.
-
-But you can also pass a function and its derivative as =x, x'=. What does that
-mean?
-
-My read is that =((j* f) x x')= on a functional =x, x'= returns a function that
-will augment its argument before passing it to =x= (and passing the whole result
-to =f=).
-
-This is basically the example from the paper:
-
-#+begin_src scheme
-(let ((curried-map (lambda (f)
-                     (lambda (xs) (map f xs)))))
-  (((j* curried-map) square (D square))
-   (list 5 10)))
-;;=> (10 20)
-#+end_src
-
-The =f= passed to =curried-map= is a version of =square= that augments its
-argument. Wonderful!
-
-*** Tag Replacement not doing anything in j*
-
-=j*=takes a continuation of some argument, and gives you back a new function
-that calls the continuation with its argument augmented by some tag. In the
-implementation they seem to want each invocation to act on a DISTINCT tag; the
-paper performs a tag-replacement step before and after.
-
-#+begin_src scheme
-(lambda (y)
-	(let ((epsilon2 (generate-epsilon)))
-	  (subst epsilon epsilon2
-		       (bun epsilon
-			          (x (subst epsilon2 epsilon y))
-			          (x-prime (subst epsilon2 epsilon y))))))
-#+end_src
-
-But I am fairly convinced that this is doing nothing. How can it be? Tag
-replacement only makes sense with =D= because you extract =tag= out before
-substituting =fresh= back in for =tag=. Here, we swap and swap back.
-
-This implementation is equivalent:
-
-#+begin_src scheme
-(lambda (y)
-	(bun epsilon (x y) (x-prime y)))
-#+end_src
-
-*** Higher Order j*
-
-What if, instead of =square=, we passed some function that expected another
-function?
-
-I have struggled with this all day, trying to think through what should happen.
-My intuition is that the =D= behavior was very clear --- every non-function
-input should get its own tag.
-
-Here are concrete examples. These also live and run at the bottom of
-=implementation_updated.ss=. These did not run with the =j*= implementation in
-the paper. I had to make a change to allow for a single-argument call to the
-function returned by =j*= that would fill in an appropriate =x'=. Here is =j*=:
-
-#+begin_src scheme
-(define (j* f)
-  (lambda (x)
-    ;; I am not sure if this is well founded... but I had to make this change to
-    ;; get the nested j* examples to work. I also had to remove the x-prime
-    ;; argument from the eta-expansion, procedure branch below.
-    (let ((x-prime (if (procedure? x) (j* x) 1)))
-      (if *eta-expansion?*
-          (if (procedure? (f x))
-	            ;; Equation (32a)
-	            (lambda (y) ((j* (lambda (x) ((f x) y))) x))
-	            ;; Equation (32b)
-	            (let ((epsilon (generate-epsilon)))
-	              (tg epsilon (f (bun epsilon x x-prime)))))
-          ;; Equation (33)
-          (let ((epsilon (generate-epsilon)))
-            (tg epsilon (f (bun epsilon x x-prime))))))))
-#+end_src
-
-Now, the examples. First, take two definitions from the Amazing Bug section
-above:
-
-#+begin_src scheme
-(define (arg-shift offset)
-  (lambda (g)
-    (lambda (a) (g (d+ a offset)))))
-
-(define (arg-shift-cont offset)
-  (lambda (cont)
-    (cont (lambda (g)
-            (lambda (a) (g (d+ a offset)))))))
-#+end_src
-
-This is the continuation we've been using in the examples above:
-
-#+begin_src scheme
-(define (cont f-hat)
-  ((f-hat (f-hat dexp)) 5))
-#+end_src
-
-Next, define a function like =arg-shift-cont=, but with =cont= at the top level
-and =offset= down one level. (GJS, is there some name for this transformation?)
-
-#+begin_src scheme
-(define (arg-shift-cont-flipped cont)
-  (lambda (offset)
-    (cont
-     (lambda (g)
-       (lambda (a) (g (d+ a offset)))))))
-#+end_src
-
-My understanding of the semantics of passing a function g to =(j* f)= is:
-
-- if =g= takes some number =x=, the function will internally produce its
-result =(g x)= in the form of a dual of =(g x) + ((d g) x)*dx=.
-
-In other words, whenever =g= is called it tags its input with =dx=, so =dx=
-bubbles up through =(g x)=.
-
-But this is example goes one level deeper, and is more confusing (at this
-moment!). The example might be one of the laws of =j*=. Flip the outer two
-calls, and the answer stays the same:
-
-#+begin_src scheme
-(((j* arg-shift-cont) 3) cont)
-;;=> (* 2 (exp 11))
-
-(((j* arg-shift-cont-flipped) cont) 3)
-;;=> (* 2 (exp 11))
-#+end_src
-
-This is already sort of mind-bending:
-
-- =(j* arg-shift-cont-flipped)= receives =cont=, a function
-- this returns =(tg epsilon (f (bun epsilon cont (j* cont))))=, which is a
-  function of =offset=
-- =(bun epsilon cont (j* cont))= is a function that is waiting to augment its
-  argument. If it receives a function, that function waits to augment /its/
-  argument, on down until finally it receives a number...
-- In this example, if you track the calls inside of =cont=, it is actually the
-  final =a= argument that is augmented!
-
-AND, crucially, the =a= argument for BOTH nested calls gets tagged with the same
-outer tag. Is that right? Or should they each receive their own tag, and be
-treated as mixed partials if they combine?
-
-We get the same answer with eta expansion and tag substitution.
-
-*** Tougher Example
-
-I don't have a good mental model for the next example. Take =cont2=:
-
-#+begin_src clojure
-(define (cont2 d-shift)
-  (let ((f-hat1 (d-shift 1))
-        (f-hat2 (d-shift 2)))
-    ((f-hat1 (f-hat2 dexp)) 2)))
-#+end_src
-
-=cont2= takes a function like =arg-shift= and makes two separate calls with
-inputs 1 and 2. Then it makes the same nested calls that =cont= does.
-
-Now do this:
-
-#+begin_src scheme
-((j* cont2) arg-shift)
-;;=> (* 2 (exp 5))
-#+end_src
-
-The =offset= argument in =arg-shift= is the non-function end of the line for
-=j*=, so any =offset= argument gets tagged with the same =dx=. The factor of 2
-comes in because /both/ =1= and =2= are augmented with the same tag, so their
-perturbations combine.
-
-If I flip the arguments and call =j*= on =arg-shift=, I don't get the factor of
-2 because =(j* arg-shift)= assigns a unique tag at every call:
-
-#+begin_src scheme
-;; identical to (cont2 (d arg-shift))
-(cont2 (j* arg-shift))
-;;=> (exp 5)
-#+end_src
-
-Should separate calls to =f-hat= inside =cont2= get tagged with the /same/ tag,
-and confuse? It seems quite wrong to have two separate inputs to =d-shift= get
-lifted into the same tangent space, given the trouble we went to to make this
-/not/ happen in Manzyuk et al.
-
-But what are the right semantics?
-
-One idea is:
-
-- every non-function input gets its own tag
-- only the tag associated with a "higher-level" call like the outer =f-hat= in
-  =(f-hat (f-hat exp))= makes it out, if there is a nested call
-
-But I don't have good intuition here. Other than the feeling that this behavior
-is inconsistent. There is some CPS transformation it seems like you could write
-down to convert a =d= call into a =j*= call that should preserve the
-tag-separation.
 
 * Miscellany, Appendices
 
