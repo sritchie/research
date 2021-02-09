@@ -395,7 +395,7 @@ A similar change in =subst= saves a function substitution work if no one is
 waiting on its epsilon:
 
 #+begin_src scheme
-(if (epsilon-active? epsilon)
+(if (epsilon-active? epsilon2)
     (let ((epsilon3 (generate-epsilon)))
 	    (subst epsilon2 epsilon3
 		         (subst epsilon1 epsilon2 (x (subst epsilon3 epsilon2 y)))))
@@ -473,6 +473,15 @@ warning by:
 - explicitly calling =fork= on the nested function, or by
 - wrapping the computation in a form that sets the =*warn?*= variable to =#f=
   within its scope
+
+** Third Way - Directional Derivative
+
+A third way to make sense of =D= on a higher-order function is to take
+inspiration from the =j*= approach and accumulate a directional derivative, with
+distinct directions specified for each argument.
+
+I think that specifying directions in a directional derivative is the key API
+challenge for this whole enterprise.
 
 ** Can we make the "epsilon" side effect completely explicit?
 

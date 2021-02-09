@@ -29,17 +29,29 @@
   *epsilon*)
 
 (define (create-dual-number epsilon primal tangent)
- ;; This enforces the invariant that no epsilon is nested inside the same
- ;; epsilon. This situation could have arisen with Equation (24b) in subst and
- ;; was the source of the bug that Sam Ritchie uncovered. The invariant is
- ;; enforced by making sure that only smaller epsilons are nested inside larger
- ;; ones.
- (if (and (or (not (dual-number? primal))
-	      (> epsilon (dual-number-epsilon primal)))
-	  (or (not (dual-number? tangent))
-	      (> epsilon (dual-number-epsilon tangent))))
-     (make-dual-number epsilon primal tangent)
-     (d+ primal (d* tangent (make-dual-number epsilon 0 1)))))
+  ;; This enforces the invariant that no epsilon is nested inside the same
+  ;; epsilon. This situation could have arisen with Equation (24b) in subst and
+  ;; was the source of the bug that Sam Ritchie uncovered. The invariant is
+  ;; enforced by making sure that only smaller epsilons are nested inside larger
+  ;; ones.
+  (if (and (or (not (dual-number? primal))
+	             (> epsilon (dual-number-epsilon primal)))
+	         (or (not (dual-number? tangent))
+	             (> epsilon (dual-number-epsilon tangent))))
+      (make-dual-number epsilon primal tangent)
+      (d+ primal (d* tangent (make-dual-number epsilon 0 1)))))
+
+(define *active-epsilons* '())
+
+(define (epsilon-active? epsilon)
+  (memq epsilon *active-epsilons*))
+
+(define (with-active-epsilon epsilon f arg)
+  (let ((old *active-epsilons*))
+    (set! *active-epsilons* (cons epsilon *active-epsilons*))
+    (let ((result (f arg)))
+      (set! *active-epsilons* old)
+      result)))
 
 (define (subst epsilon1 epsilon2 x)
   (cond ((real? x) x)			;Equation (24a)
@@ -58,9 +70,15 @@
 	         (case *function-substitution*
              ((equation-24d)
 	            ;; Equation (24d)
-	            (let ((epsilon3 (generate-epsilon)))
-	              (subst epsilon2 epsilon3
-		                   (subst epsilon1 epsilon2 (x (subst epsilon3 epsilon2 y))))))
+	            (if *save-work?*
+                  (if (epsilon-active? epsilon2)
+                      (let ((epsilon3 (generate-epsilon)))
+	                      (subst epsilon2 epsilon3
+		                           (subst epsilon1 epsilon2 (x (subst epsilon3 epsilon2 y)))))
+                      (subst epsilon1 epsilon2 (x y)))
+                  (let ((epsilon3 (generate-epsilon)))
+	                  (subst epsilon2 epsilon3
+		                       (subst epsilon1 epsilon2 (x (subst epsilon3 epsilon2 y)))))))
 	           ((equation-38)
 	            ;; Equation (38)
 	            (subst epsilon2 epsilon1 (x (subst epsilon1 epsilon2 y))))
@@ -68,18 +86,6 @@
 	           ((equation-41) (x y))
 	           (else (error "A")))))
         (else (error "B"))))
-
-(define *active-epsilons* '())
-
-(define (epsilon-active? epsilon)
-  (memq epsilon *active-epsilons*))
-
-(define (with-active-epsilon epsilon f arg)
-  (let ((old *active-epsilons*))
-    (set! *active-epsilons* (cons epsilon *active-epsilons*))
-    (let ((result (f arg)))
-      (set! *active-epsilons* old)
-      result)))
 
 (define (prim epsilon x)
   (cond ((real? x) x)
@@ -255,9 +261,9 @@
 (newline)
 
 (define (f x)
- (lambda (cont)
-  ((cont (lambda (y) (d* x (d* x y))))
-   (lambda (g) (g x)))))
+  (lambda (cont)
+    ((cont (lambda (y) (d* x (d* x y))))
+     (lambda (g) (g x)))))
 
 (write "case 1, (f2 f1) inside continuation: ")
 (write (((d f) 2)
