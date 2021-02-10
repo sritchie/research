@@ -713,7 +713,7 @@ that we can pass to =D= on is both =f= and =(pushforward f)=.
 That is because, thanks to generic functions, =f= can accept both:
 
 - some input point $a: M$ on a manifold $M$
-- a differential object $(a: M, a-prime: T_a M, tag)$, i.e., a tagged element of
+- a differential object $(a: M, a': T_a M, tag)$, i.e., a (tagged) element of
   the tangent bundle of manifold $M$
 
 Given $f: M \to N$, =D= is /not/ the pushforward operator; =(D f)= returns a
@@ -728,37 +728,25 @@ This is a directional derivative, of course, but the direction is trivial, so
 
 To take a directional derivative at some point in a greater-than-1 dimensional
 manifold, the user has to break the ambiguity in direction by supplying an
-explicit structural tangent vector. =j*= in Manzyuk et al. takes a second
-tangent vector argument to support this.
-
-*** j*, directional derivative
-
-=((D f) x)= takes a single point and assumes the tangent vector =1=, while =((j*
-f) x x')= takes a second tangent vector as =x'=. This opens up the domain of
-=(j* f)= beyond $\mathbb{R}$ to any structured argument (by requiring a tangent
-vector of the same structure).
+explicit structural tangent vector, =x'=. =j*= in Manzyuk et al. accepts a
+second argument to support this.
 
 *** Functions in the domain of j*
 
-Manzyuk et al. introduced the directional derivative operator to allow =(j* f)=
-to take a function as its first argument. (The example they give would turn out
-exactly the same if they had just allowed =(D f)= to take a function h with
-default tangent vector (D h), but no matter.)
+Consider the case where =(j* f)= accepts a function argument =g=.
 
-Repeating a definition from above: What is the type of the tangent vector of a
-function f from M => N? Manzyuk et al says the type T(M => N) is defined as M =>
-T N.
+Repeating a definition from above: the type of the tangent vector of a function
+$g: M \to N$ is $M \to T N$.
 
-Hmm, that is convenient. Given f: M => N, we can use f and (D f) to make a
-function with the correct type:
+That conveniently matches the signature of =(D g)=. Given $g: M \to N$, we can
+use =g= and =(D g)= to make a function with the correct type:
 
 #+begin_src scheme
-(lambda (x) (make-x+dx (f x) ((D f) x)))
+(lambda (x) (make-x+dx (g x) ((D g) x)))
 #+end_src
 
-In fact, this is what the authors do in the paper for their example in equation
-35c. =sqr= and =(D sqr)= both get "bundled" into a function like the one in the
-line above (I didn't put the tag in):
+In fact, this is what Manzyuk et al. does in equation 35c. =sqr= and =(D sqr)=
+both get "bundled" into a function like the one in the line above:
 
 \begin{equation}
 \begin{aligned}
@@ -768,52 +756,56 @@ line above (I didn't put the tag in):
 \end{aligned}
 \end{equation}
 
-OKAY! Here be dragons...
+Now! Here be dragons, for the reasons I described in the introduction to this
+section.
 
-The reason that this feels troubling to me is a combo of these observations:
+This feels troubling to me for the following reasons:
 
-1. (D f), as I note above, takes a numeric input, and always assigns a tangent
-   vector of 1.
-2. ((j* g) f (D f)) passes an augmented version of f to g; inside the body of g,
-   any time this augmented f is called with a point in M, it maps that point to
-   T N... but every input receives the SAME tag.
+1. =(D g)=, as I note above, takes a numeric input, and always assigns a tangent
+   vector of =1=.
+2. =((j* f) g (D g))= passes an augmented version of =g= to =f=; inside the body
+   of =f=, any time this augmented =g= is called with a point in $M$, it maps
+   that point to $T N$... but every input receives the /same/ tag. (There is a
+   tag substitution step, but I believe it's not doing anything. See
+   [[replacement]].)
 3. There is no way (or reason) to assign a different tag to each call to the
-   augmented f, because which tag would you extract?
+   augmented =f=, because which tag would the new function extract?
 
-Take this example, written with scmutils functions:
+Repeating the example from the introduction, these two functions return the same
+result:
 
 #+begin_src scheme
 (let ((g (lambda (f)
-           (* (f 1)
+           (d* (f 1)
               (f 2)))))
   ((j* g) exp (D exp)))
-#+end_src
+;;=> (* 2 (exp 1) (exp 2))
 
-the f passed into g is an augmented f, so both "1" and "2" are paired with a
-tangent vector of 1. The whole form returns (* 2 (exp 1) (exp 2)), the sum of
-partials with respect to the "1" and '2" arguments.
-
-Passing a function f as the first argument to (j* g) seems to give you the same
-behavior as passing a structure of all of the arguments you eventually pass to
-f, paired with a tangent structure of the same shape, filled with 1s. That is
-strange! But that's my claim; that the following form is equivalent.
-
-#+begin_src scheme
-(let ((g (lambda (input)
-           (let ((one (ref input 0))
-                 (two (ref input 1)))
+(let ((f (lambda (input)
+           (let ((one (car input))
+                 (two (cadr input)))
              (* (exp one)
                 (exp two))))))
-  ((j* g) (up 1 2) (up 1 1)))
+  ((j* f) (list 1 2) (list 1 1)))
+;;=> (* 2 (exp 1) (exp 2))
 #+end_src
+
+And repeating a comment: assigning a tangent vector of 1 on every call to =g'=
+is something like taking a directional derivative on a =n=-dimensional manifold,
+where =n= is the number of calls to =g=, and the direction is a structure with
+=n= "1" entries.
 
 *** API Observation
 
-I think ALL of these troubles and confusions that we've encountered come from
-the desire to be able to use =g= or =(j* g)= on the same definition of =g=,
-without wiring tangent vectors into each argument spot.
+I think most of the confusion I've encountered stems from the desire to be able
+to treat =g= or =(j* g)= identically, without wiring tangent vectors into each
+argument spot. This is manageable with a single $\mathbb{R}$ input or an
+explicit tangent vector, but quite confusing when a directional derivative is
+built on the fly inside of a function.
 
-You could imagine, for example, a program transformation that takes this form:
+But it might still be a great idea!
+
+You could imagine, for example, a program transformation from this form:
 
 #+begin_src scheme
 (let ((g (lambda (f)
@@ -822,25 +814,30 @@ You could imagine, for example, a program transformation that takes this form:
   ((j* g) exp (D exp)))
 #+end_src
 
-and returns a Jacobian-like thing that shows you the partials with respect to
-each argument you supplied to =f=. You'd lose the property that the return value
-had a structure you could multiply by an increment in the "input" to get an
-increment in the output... because there's no clear input structure, the
-components of the actual, non-function source manifold are spread through the
-source code.
+To some Jacobian-like thing that shows you the partials with respect to each
+call to =f=. In this imagined UI you could adjust the tangent vector
+contribution from each argument on the fly, or change the values and see how the
+derivative of the full form changes.
 
-You could also break the ambiguity by forcing the second argument to =j*= to be
+You would lose the property that the return value had a structure you could
+multiply by an increment in the "input" to get an increment in the output. There
+is no clear input structure!
+
+You might also break the ambiguity by forcing the second argument to =j*= to be
 a pair of:
 
 - a mapping of $M \to T N$
-- a mapping of m: M => T_m M, i.e., a function that gives you a tangent vector
-  for each point in M....
+- a mapping of $m: M \to T_m M$, i.e., a function that gives you a tangent
+  vector for each point in $M$. This is indeed what a vector field does in
+  differential geometry.
 
-But this isn't helpful, because we're not interested in the tangent vector at
-each VALUE --- we want a tangent vector entry for each time the augmented 'f' is
-called inside g.
+This won't solve the problem above, as we're not interested in the tangent
+vector at each /value/ --- we want a tangent vector entry for each invocation of
+the augmented =g'=.
 
-*** Tag Replacement not doing anything in j*
+One more note before I conclude.
+
+*** <<replacement>>Tag Replacement not doing anything in j*
 
 The implementation of =j*= in section 9 seems to want each invocation to act on
 a /distinct/ tag. The paper performs a tag-replacement step before and after
@@ -872,41 +869,40 @@ Is there an example that behaves differently for these two cases?
 *** The Question, Summary:
 
 In summary, the directional derivative operator is the Real Thing here, and
-presents a nice API in these cases for (j* f):
+presents a possible API for the following cases for =(j* f)=:
 
-- f has its first (or only) argument in R? Assign that argument a default
-  tangent vector of 1, and all other arguments 0, and allow the user to override
-  these defaults.
-- f has a structural first argument of dimension N? Make the user provide an
-  N-dimensional tangent vector.
-- f RETURNS a function? Treat that as a curried multi-argument function, and
-  make the user call the RETURNED function with a value and its tangent vector.
-  Treat N total (curried) arguments with tangent vectors as a single "up"
-  structure argument with an "up" structure tangent vector of the supplied
+- For $f: \mathbb{R} \to \mathbb{R}^m$, assign a default tangent vector of 1.
+- If $f$ returns a function, have the function returned by =(j* f)= optionally
+  accept a second =x'= argument, but have it default to =0= for $\mathbb{R}$
+  inputs, =(zero-like x)= for structural inputs and a non-augmented =g= for some
+  functional input =g=.
+- For $f$ with a structural first argument, force the user to provide an
+  explicit tangent vector.
+- Treat $n$ total (curried) arguments and their tangent vectors as a single
+  structural argument with a structural tangent vector built out of the supplied
   pieces.
 
-These are all nice because the user always supplies the tangent vector of an
-argument NEXT TO the argument... or the default is sane.
+These all feel nice for the user, because the user always supplies the tangent
+vector of an argument along with the argument itself (or a sane default is
+supplied).
 
-The Manzyuk et al. semantics for a functional argument, however, are potentially
-more confusing. The function has to either:
+The current =j*= semantics for a functional input, however, seem confusing. The
+function has to either:
 
-- assign some default tangent vector to its argument every time it's called
-  (which gives you a shadowy N-dimensional input structure for N calls)
-- require an explicit tangent vector at each call site, which means you'd have
-  to rewrite the function!
-- Arbitrarily choose one call to privilege
+- assign some default non-zero tangent vector to its argument every time it's
+  called
+- Force the user to provide an explicit tangent vector at each call site; this
+  would require a rewrite of the function!
+- Somehow arbitrarily choose one internal call to privilege, and assign a
+  tangent vector of =1= in that case and =0= to all other calls.
 
 Or... what? Is there some Jacobian-like thing we can return?
 
 I think this is a juicy API design question:
 
-- Do we forbid this?
-- If we don't, what is a sane default?
+- Does it make sense to pursue =j*= with a functional argument?
+- If allowed, what is a sane default behavior?
 - How do we sanely let the user customize?
-
-This was a lot! Hopefully there was more meat here than fluff. Looking forward
-to hearing your thoughts post-digestion.
 
 * Miscellany, Appendices
 
