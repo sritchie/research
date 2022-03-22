@@ -389,6 +389,11 @@
 (set! *tag-substitution?* #t)
 (set! *fix-three?* #f)
 
+;; I did a bunch of investigation of j* below; this helped me wrap my head
+;; around what I wrote up in the paper. I'll leave these for fun, even though I
+;; don't think they're necessary anymore to show the strangeness.
+;;
+;; Enjoy!
 (write "j* Investigation")
 (newline)
 

@@ -4,3 +4,4 @@ auto
 *.pdf
 *.tex
 *.edn
+_minted*

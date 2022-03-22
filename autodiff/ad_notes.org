@@ -1,0 +1,79 @@
+* More Notes
+
+  Another development...
+
+
+  #+begin_src clojure
+(defn simplify-fn [f]
+  (let [body (freeze
+              (simplify (f 'x)))]
+    (eval
+     (concat '(fn [x])
+             (list body)))))
+
+(defn s-D [f]
+  (simplify-fn (D f)))
+
+
+(defn sDn [n func] (nth (iterate s-D func) n))
+(defn Dn [n func] (nth (iterate D func) n))
+  #+end_src
+
+  now compare the times...
+
+  #+begin_src clojure
+(time
+ ((sDn 7 (fn [x] (* (expt x 5)
+                   (cos (* (sqrt x) (+ x 3))))))
+  'x))
+
+(let ((f (literal-function 'f)))
+  (((expt D 3) f) 'x))
+
+[[[]            (f x)]
+ [[123]         ((D f) x)]
+ [[124]         ((D f) x)]
+ [[125]         ((D f) x)]
+ [[123 124]     (((expt D 2) f) x)]
+ [[123 125]     (((expt D 2) f) x)]
+ [[124 125]     (((expt D 2) f) x)]
+ [[123 124 125] (((expt D 3) f) x)]]
+  #+end_src
+
+
+  #+begin_src scheme
+(define (g x)
+  (* (expt x 5)
+     (cos (* (sqrt x) (+ x 3)))))
+
+(show-time (lambda () (simplify
+                  (((expt D 7) g)
+                   'x))))
+
+(define (simplify-compile f)
+  (let* ((sym  (generate-uninterned-symbol "x"))
+         (body (simplify (f sym))))
+    (eval `(lambda (,sym) ,body)
+          generic-environment)))
+
+(define Ds
+  (make-operator
+   (lambda (f)
+     (simplify-compile (D f)))
+   'Ds))
+
+(let ((f (lambda (x)
+           (* (expt x 5)
+              (cos (* (sqrt x) (+ x 3)))))))
+  (show-time
+   (lambda ()
+     (simplify
+      (((expt D 7) f)
+       'x)))))
+
+
+(show-time (lambda ()
+             (simplify
+              (((expt Ds 20) f)
+               'x))))
+  #+end_src

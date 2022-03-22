@@ -1,0 +1,27 @@
+* Errata for SICM
+
+- **page 54, equation 1.90**: The equality is written here as $$(x_\alpha(t) -
+  x_\beta(t)) * (x_\alpha(t) - x_\beta(t)) = l_{\alpha \beta}^2$$. That is true
+  if $$x$$ is one dimensional, but if $$x_\alpha$$ and $$x_\beta$$ have multiple
+  coordinates and produce a tuple then the tuple arithmetic isn't going to work
+  out, since both produce up tuples, presumably.
+
+This should read: $$(x_\alpha(t) - x_\beta(t))^2 = l_{\alpha \beta}^2$$,
+squaring instead of multiplying the tuple by itself.
+
+**Page 60, line 10**: "for a constrained **systems**" should read "for a
+constrained **system**".
+
+**Page 76:** the `a` variable should be uppercase, like `A`.
+
+**Page 86, line 5 of the text:** The equation's trying to show that both the x
+and v vectors are orthogonal to the angular momentum vector. There's a typo in
+the second element, which reads "V dot (X x X) = 0". It should read "V dot (X
+x **V**) = 0". It's technically true of course! X x X is always zero, so of
+course dotting V would be zero. But I think this is not the intent. In LaTeX:
+
+- Actual: $$\vec{x} \cdot (\vec{x} \times \vec{v}) = \vec{v} \cdot (\vec{x}
+  \times \vec{x}) = 0$$
+
+- Corrected: $$\vec{x} \cdot (\vec{x} \times \vec{v}) = \vec{v} \cdot (\vec{x}
+  \times \vec{v}) = 0$$
